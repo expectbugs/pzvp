@@ -1,0 +1,9 @@
+name=Zomboid Video Player
+id=PZVP
+require=PZFB
+description=Watch videos in Project Zomboid! Drop video files into your Zomboid/PZVP/ folder, press INSERT in-game, pick a video and quality, and enjoy. Supports play, pause, seek, and aspect-ratio-correct display in a resizable window. Requires ffmpeg installed on your system. Tested on Linux — Windows feedback welcome!
+poster=poster.png
+icon=icon.png
+modversion=1.0.0
+versionMin=42.0
+url=https://github.com/expectbugs/pzvp
