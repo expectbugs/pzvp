@@ -26,7 +26,7 @@ PZVPVideoPanel = PZFBInputPanel:derive("PZVPVideoPanel")
 
 function PZVPVideoPanel:new(x, y, w, h, player)
     local o = PZFBInputPanel.new(self, x, y, w, h, {
-        mode = PZFBInput.MODE_SELECTIVE,
+        mode = PZFBInput.MODE_FOCUS,
         escapeCloses = false,
         forceCursorVisible = false,
         autoGrab = false,
