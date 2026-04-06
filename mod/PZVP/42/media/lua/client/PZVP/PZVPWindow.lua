@@ -2,6 +2,7 @@
 -- ISCollapsableWindow with video display, controls, file picker, and quality selector.
 
 require "PZFB/PZFBApi"
+require "PZFB/PZFBInput"
 require "PZVP/PZVPPlayer"
 
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
@@ -21,12 +22,15 @@ local QUALITY_PRESETS = {
 -- PZVPVideoPanel — renders the framebuffer with aspect ratio
 -- ============================================================
 
-PZVPVideoPanel = ISPanel:derive("PZVPVideoPanel")
+PZVPVideoPanel = PZFBInputPanel:derive("PZVPVideoPanel")
 
 function PZVPVideoPanel:new(x, y, w, h, player)
-    local o = ISPanel:new(x, y, w, h)
-    setmetatable(o, self)
-    self.__index = self
+    local o = PZFBInputPanel.new(self, x, y, w, h, {
+        mode = PZFBInput.MODE_SELECTIVE,
+        escapeCloses = false,
+        forceCursorVisible = false,
+        autoGrab = false,
+    })
     o.player = player
     o.background = false
     o.anchorLeft = true
@@ -36,12 +40,53 @@ function PZVPVideoPanel:new(x, y, w, h, player)
     return o
 end
 
+function PZVPVideoPanel:createChildren()
+    PZFBInputPanel.createChildren(self)
+    self:captureKey(Keyboard.KEY_SPACE)
+    self:captureKey(Keyboard.KEY_LEFT)
+    self:captureKey(Keyboard.KEY_RIGHT)
+    self:captureKey(Keyboard.KEY_UP)
+    self:captureKey(Keyboard.KEY_DOWN)
+end
+
+function PZVPVideoPanel:onPZFBKeyDown(key)
+    local player = self.player
+    if not player then return end
+
+    if key == Keyboard.KEY_SPACE then
+        player:togglePlayPause()
+    elseif key == Keyboard.KEY_LEFT then
+        if player.currentFrame >= 0 and player.fps > 0 then
+            local curTime = player.currentFrame / player.fps
+            player:seek(curTime - 5)
+        end
+    elseif key == Keyboard.KEY_RIGHT then
+        if player.currentFrame >= 0 and player.fps > 0 then
+            local curTime = player.currentFrame / player.fps
+            player:seek(curTime + 5)
+        end
+    elseif key == Keyboard.KEY_UP then
+        PZFB.audioSetVolume(1.0)
+    elseif key == Keyboard.KEY_DOWN then
+        PZFB.audioSetVolume(0.3)
+    end
+end
+
+function PZVPVideoPanel:onPZFBMouseDown(x, y, btn)
+    if btn == 0 and self.player then
+        if self.player.state == "PLAYING" or self.player.state == "PAUSED" or self.player.state == "ENDED" then
+            self.player:togglePlayPause()
+        end
+    end
+end
+
 function PZVPVideoPanel:prerender()
+    PZFBInputPanel.prerender(self)
     self:drawRectStatic(0, 0, self.width, self.height, 1, 0, 0, 0)
 end
 
 function PZVPVideoPanel:render()
-    ISPanel.render(self)
+    PZFBInputPanel.render(self)
 
     local player = self.player
     if not player then return end
@@ -83,14 +128,6 @@ function PZVPVideoPanel:render()
 
         self:drawTextureScaled(PZFB.getTexture(player.fb), drawX, drawY, drawW, drawH, 1, 1, 1, 1)
     end
-end
-
-function PZVPVideoPanel:onMouseDown(x, y)
-    if self.player and (self.player.state == "PLAYING" or self.player.state == "PAUSED" or self.player.state == "ENDED") then
-        self.player:togglePlayPause()
-        return true
-    end
-    return false
 end
 
 -- ============================================================
@@ -450,6 +487,7 @@ function PZVPWindow:createChildren()
 end
 
 function PZVPWindow:showFilePicker()
+    self.videoPanel:releaseInput()
     self.fileList:setVisible(true)
     self.fileList:refresh()
     self.qualityPicker:setVisible(false)
@@ -458,6 +496,7 @@ function PZVPWindow:showFilePicker()
 end
 
 function PZVPWindow:showQualityPicker(filename)
+    self.videoPanel:releaseInput()
     self.selectedFile = filename
     self.qualityPicker.filename = filename
     self.fileList:setVisible(false)
@@ -471,6 +510,7 @@ function PZVPWindow:showPlayer()
     self.qualityPicker:setVisible(false)
     self.videoPanel:setVisible(true)
     self.controlBar:setVisible(true)
+    self.videoPanel:grabInput()
 end
 
 function PZVPWindow:onFileSelected(filename)
