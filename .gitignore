@@ -2,6 +2,3 @@
 *.wav
 *.ogg
 converted/
-
-# Claude
-CLAUDE.md
