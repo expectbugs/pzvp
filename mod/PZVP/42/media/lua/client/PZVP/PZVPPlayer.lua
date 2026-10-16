@@ -1,10 +1,23 @@
 -- PZVP — Streaming Video Playback Engine
 -- Uses PZFB streaming API: ffmpeg pipes frames to in-memory ring buffer.
+--
+-- PZFB compatibility: PZFB 1.8 tags each stream/game start with a session id
+-- (Contract C1) so this player only stops and reads its own stream. On PZFB
+-- 1.7.x Lua or class files everything degrades to the legacy global-slot
+-- behavior; every 1.8-only function is feature-detected before use.
 
 require "PZFB/PZFBApi"
 
 PZVPPlayer = {}
 PZVPPlayer.__index = PZVPPlayer
+
+-- Do we still own PZFB's shared stream slot? Legacy PZFB can't tell: assume yes.
+local function pzfbOwnsSession(id)
+    if PZFB.ownsSession then
+        return PZFB.ownsSession(id)
+    end
+    return true
+end
 
 function PZVPPlayer:new()
     local o = setmetatable({}, self)
@@ -23,6 +36,8 @@ function PZVPPlayer:new()
     o.audioLoaded = false
     o.audioStarted = false
     o.audioReloaded = false -- true after reload with complete file (seeking works)
+    o.started = false       -- true while a stream we started may be alive
+    o.sessionId = nil       -- PZFB 1.8 session id of that stream (nil on legacy PZFB)
     return o
 end
 
@@ -31,14 +46,24 @@ function PZVPPlayer:startVideo(inputPath, qualityScale)
     self:stop()
     self.inputPath = inputPath
     self.errorMsg = nil
-    PZFB.streamStart(inputPath, qualityScale, 120)
+    -- PZFB 1.8 returns the session id; 1.7.x returns nothing (nil = legacy).
+    self.sessionId = PZFB.streamStart(inputPath, qualityScale, 120)
+    self.started = true
     self.state = "STARTING"
+end
+
+--- Does our stream still own PZFB's shared slot?
+function PZVPPlayer:ownsSession()
+    return self.started and pzfbOwnsSession(self.sessionId)
 end
 
 --- Start playback from current frameOffset.
 function PZVPPlayer:play()
     if self.state ~= "BUFFERING" and self.state ~= "SEEKING" and self.state ~= "ENDED" then return end
     if self.state == "ENDED" then
+        -- streamSeek() is global (not session-scoped): never issue it unless
+        -- the stream slot is still ours.
+        if not self:ownsSession() then return end
         self.frameOffset = 0
         self.currentFrame = -1
         PZFB.streamSeek(0)
@@ -93,6 +118,8 @@ end
 --- Seek to a time in seconds.
 function PZVPPlayer:seek(timeSec)
     if self.state == "IDLE" or self.state == "STARTING" then return end
+    -- streamSeek() is global (not session-scoped): only seek our own stream.
+    if not self:ownsSession() then return end
     if timeSec < 0 then timeSec = 0 end
     if self.duration > 0 and timeSec > self.duration then timeSec = self.duration end
 
@@ -109,9 +136,21 @@ function PZVPPlayer:seek(timeSec)
 end
 
 --- Stop playback and release all resources.
+--- Only stops what this player started: PZFB's audio channel is released only
+--- if we loaded audio, and the stream stop is scoped to our session id on
+--- PZFB 1.8 (no-op if another mod has since taken the slot). On legacy PZFB
+--- the unconditional streamStop() is only issued if we actually started a
+--- stream, so opening the window / pressing "Open" never disturbs another
+--- mod's running game.
 function PZVPPlayer:stop()
-    PZFB.audioStop()
-    PZFB.streamStop()
+    if self.audioLoaded then
+        PZFB.audioStop()
+    end
+    if self.started then
+        PZFB.streamStop(self.sessionId)
+    end
+    self.started = false
+    self.sessionId = nil
     if self.fb then
         PZFB.destroy(self.fb)
         self.fb = nil
@@ -124,8 +163,26 @@ function PZVPPlayer:stop()
     self.state = "IDLE"
 end
 
+--- Another mod started a game/stream, which ended our session inside PZFB.
+--- Release our side without touching the slot (it is theirs now).
+function PZVPPlayer:_onSessionTaken()
+    self.started = false
+    self.sessionId = nil
+    self:stop()   -- stops our audio (if any) + frees the texture; no streamStop
+    self.errorMsg = "Playback stopped: another mod took over PZFB's video slot."
+end
+
 --- Update — call every frame from render().
 function PZVPPlayer:update()
+    if self.state == "IDLE" then return end
+
+    -- PZFB 1.8: a takeover by another mod must never be read as our status
+    -- (streamStatus()/streamFrame() are global).
+    if not self:ownsSession() then
+        self:_onSessionTaken()
+        return
+    end
+
     if self.state == "STARTING" then
         local s = PZFB.streamStatus()
         if s >= 2 then
@@ -217,7 +274,8 @@ function PZVPPlayer:update()
     end
 
     if targetFrame ~= self.currentFrame and targetFrame >= 0 then
-        if PZFB.streamFrame(self.fb, targetFrame) then
+        -- Third argument = session id: scoped on PZFB 1.8, ignored by 1.7.x.
+        if PZFB.streamFrame(self.fb, targetFrame, self.sessionId) then
             self.currentFrame = targetFrame
         end
     end

@@ -40,14 +40,9 @@ function PZVPVideoPanel:new(x, y, w, h, player)
     return o
 end
 
-function PZVPVideoPanel:createChildren()
-    PZFBInputPanel.createChildren(self)
-    self:captureKey(Keyboard.KEY_SPACE)
-    self:captureKey(Keyboard.KEY_LEFT)
-    self:captureKey(Keyboard.KEY_RIGHT)
-    self:captureKey(Keyboard.KEY_UP)
-    self:captureKey(Keyboard.KEY_DOWN)
-end
+-- Note: MODE_FOCUS consumes every key while the mouse is over the panel and
+-- none otherwise; captureKey() lists are only consulted in MODE_SELECTIVE, so
+-- the panel registers none.
 
 function PZVPVideoPanel:onPZFBKeyDown(key)
     local player = self.player
@@ -532,8 +527,19 @@ function PZVPWindow:onQualitySelected(preset)
 end
 
 function PZVPWindow:close()
+    -- Stops only what this player started (session-scoped on PZFB 1.8).
     if self.player then
         self.player:stop()
+    end
+    -- Input panel teardown (PZFB Contract C3): removeFromUIManager() does not
+    -- notify children. PZFB 1.8 has cleanup(); on 1.7.x the panel's own
+    -- close() releases capture + removes its listeners and only hides it.
+    if self.videoPanel then
+        if self.videoPanel.cleanup then
+            self.videoPanel:cleanup()
+        else
+            self.videoPanel:close()
+        end
     end
     self:setVisible(false)
     self:removeFromUIManager()
